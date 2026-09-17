@@ -340,7 +340,7 @@
       </button>
       <button class="btn btn-reset" id="resetAppBtn"
         style="background:var(--danger-dim);border-color:var(--danger);color:var(--danger);font-weight:600"
-        title="Delete ALL data: progress history, streaks and settings — cannot be undone">
+        title="Delete this trainer's data: progress history, streaks, settings and profiles. Other trainers are not affected — cannot be undone">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
         Wipe all data
       </button>
@@ -1185,9 +1185,13 @@ function playBeep(){
     playBeepType(settings.beepType||'sine', settings.beepVol);
 }
 
-/* ── Storage ── */
-const loadProgress = ()=>{ try{return JSON.parse(localStorage.getItem('mp_prog'))||{};}catch{return {};} };
-const saveProgress = d=>{ try{localStorage.setItem('mp_prog',JSON.stringify(d));}catch{} };
+/* ── Storage ──
+   Every key this page owns, and the only ones "Wipe all data" may remove.
+   This page shares its origin with every other trainer in mindbuild, so
+   nothing here may touch a key it does not own — hence no localStorage.clear(). */
+const KEYS = { prog:'mp_prog', sett:'mp_sett_v2', theme:'mp_theme', profiles:'cct_profiles' };
+const loadProgress = ()=>{ try{return JSON.parse(localStorage.getItem(KEYS.prog))||{};}catch{return {};} };
+const saveProgress = d=>{ try{localStorage.setItem(KEYS.prog,JSON.stringify(d));}catch{} };
 
 const DEFAULTS = {
   mode:'standard', duration:15, startISI:1500, nback:1,
@@ -1217,7 +1221,7 @@ const DEFAULTS = {
 
 function loadSettings(){
   try{
-    const s=JSON.parse(localStorage.getItem('mp_sett_v2'));
+    const s=JSON.parse(localStorage.getItem(KEYS.sett));
     if(!s) return Object.assign({},DEFAULTS,{switchOps:Object.assign({},DEFAULTS.switchOps),switchColors:Object.assign({},DEFAULTS.switchColors)});
     // Deep-merge object-valued keys so old saves don't lose new sub-keys
     const merged=Object.assign({},DEFAULTS,s);
@@ -1228,16 +1232,16 @@ function loadSettings(){
     return Object.assign({},DEFAULTS,{switchOps:Object.assign({},DEFAULTS.switchOps),switchColors:Object.assign({},DEFAULTS.switchColors)});
   }
 }
-function saveSettings(){ try{localStorage.setItem('mp_sett_v2',JSON.stringify(settings));}catch{} }
+function saveSettings(){ try{localStorage.setItem(KEYS.sett,JSON.stringify(settings));}catch{} }
 let settings = loadSettings();
 
 /* ── Theme ── */
-let theme = localStorage.getItem('mp_theme')||'dark';
+let theme = localStorage.getItem(KEYS.theme)||'dark';
 const sunIcon = `<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364-.707.707M6.343 17.657l-.707.707M17.657 17.657l-.707-.707M6.343 6.343l-.707-.707M12 7a5 5 0 1 0 0 10A5 5 0 0 0 12 7z"/>`;
 const moonIcon = `<path stroke-linecap="round" stroke-linejoin="round" d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>`;
 function applyTheme(t){
   document.documentElement.setAttribute('data-theme',t);
-  localStorage.setItem('mp_theme',t);
+  localStorage.setItem(KEYS.theme,t);
   const icon=$('themeBtnIcon'); const label=$('themeBtnLabel');
   if(icon){ icon.innerHTML = t==='dark' ? moonIcon : sunIcon; }
   if(label){ label.textContent = t==='dark' ? 'Dark' : 'Light'; }
@@ -1706,7 +1710,7 @@ function applyRuleSwitchColor(op){
    The Share button can export all current settings OR a single
    profile as a URL param.
 ════════════════════════════════════════════════════════════════════ */
-const PROFILES_KEY='cct_profiles';
+const PROFILES_KEY=KEYS.profiles;
 function loadProfiles(){ try{return JSON.parse(localStorage.getItem(PROFILES_KEY))||[];}catch{return[];} }
 function saveProfiles(p){ try{localStorage.setItem(PROFILES_KEY,JSON.stringify(p));}catch{} }
 
@@ -1844,13 +1848,13 @@ document.addEventListener('keydown',e=>{
 /* Reset app (wipe all data) */
 $('resetAppBtn').addEventListener('click',()=>{
   openModal(
-    'Reset entire app?',
-    'This will delete ALL session history, progress data, streaks, and settings. This cannot be undone.',
+    'Wipe Cognitive Control Training data?',
+    'This will delete ALL of this trainer\'s session history, progress data, streaks, settings and saved profiles. Other trainers are not affected. This cannot be undone.',
     ()=>{
-      localStorage.clear();
+      Object.values(KEYS).forEach(k=>{ try{localStorage.removeItem(k);}catch{} });
       location.reload();
     },
-    'Wipe everything', true
+    'Wipe', true
   );
 });
 
