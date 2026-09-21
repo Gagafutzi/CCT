@@ -188,7 +188,10 @@
 
     .numpad{display:none;grid-template-columns:repeat(6,1fr);gap:5px}
     .numpad.visible{display:grid}
-    .numpad-btn{aspect-ratio:1;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--mono);font-size:.92rem;cursor:pointer;transition:all var(--t)}
+    /* --pad-scale is the Button size setting, set on the pad rather than written
+       into every button: a rule can then raise the floor under it (see the
+       coarse-pointer block) instead of being outranked by an inline style. */
+    .numpad-btn{aspect-ratio:1;min-height:calc(2.2rem * var(--pad-scale,1));background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--mono);font-size:calc(.92rem * var(--pad-scale,1));cursor:pointer;transition:all var(--t);touch-action:manipulation}
     .numpad-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
     .numpad-btn.selected{background:var(--accent);color:#000;border-color:var(--accent)}
     .numpad-btn.wrong-sel{background:var(--danger-dim);border-color:var(--danger);color:var(--danger)}
@@ -300,6 +303,54 @@
     .anim-in{animation:fadeUp .3s ease both}
     @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
     @media(max-width:480px){h1{font-size:1.65rem}.timer-display{font-size:2rem}.stimulus-number{font-size:4rem}}
+
+    /* ── Touch ─────────────────────────────────────────────────────────
+       A coarse pointer is a fingertip, and a fingertip is about 9mm across.
+       Everything it has to hit gets at least 44px of it, and the slider —
+       a 17px thumb on a 5px rail, which is the control this app asks you to
+       set almost everything with — gets a thumb and a rail it can be dragged
+       by without the finger covering the value it is setting. */
+    @media(pointer:coarse){
+      .btn,.icon-btn,.tab-btn{min-height:44px}
+      .btn,.icon-btn,.tab-btn,.numpad-btn,.toggle-track{touch-action:manipulation}
+      .slider{height:8px}
+      .slider::-webkit-slider-thumb{width:28px;height:28px}
+      .slider::-moz-range-thumb{width:28px;height:28px}
+      .num-input{font-size:1.05rem;padding:.6rem .7rem}
+      .toggle{width:46px;height:26px}
+      .toggle-track::after{width:18px;height:18px}
+      .toggle input:checked+.toggle-track::after{transform:translateX(20px)}
+      .numpad-btn{min-height:max(44px, calc(2.2rem * var(--pad-scale,1)))}
+    }
+
+    /* The top bar's buttons ran off the right edge of a phone, which put the
+       settings reset and the theme switch somewhere no finger could reach.
+       They wrap instead. */
+    @media(max-width:560px){
+      .topbar{flex-wrap:wrap;gap:6px;padding:.6rem .75rem}
+      .topbar-actions{flex-wrap:wrap;justify-content:flex-end}
+    }
+    /* ── Training, portrait ────────────────────────────────────────────
+       The stimulus and the answer keys have to be on screen together: a trial
+       lasts a second or two, and scrolling to find the keys inside it is not
+       something a hand can do. So the furniture between them gives up its
+       padding — and the keys stop being forced square, which on a narrow grid
+       made them taller than the screen had to spare. */
+    @media(max-width:700px){
+      #pageTrain .train-layout{width:calc(100% - 1rem);padding:.6rem 0 .8rem;gap:.55rem}
+      #pageTrain .topbar{padding:.5rem .75rem}
+      #pageTrain .stat-tile{padding:.4rem .55rem}
+      #pageTrain .stat-tile-val{font-size:1.05rem}
+      #pageTrain .timer-display{font-size:1.6rem}
+      #pageTrain .speed-val{font-size:.85rem}
+      #pageTrain .stimulus-box{min-height:0;padding:.9rem .6rem;gap:.45rem}
+      #pageTrain .stimulus-number{font-size:3.2rem}
+      #pageTrain .stimulus-number.hidden-num{font-size:2rem}
+      #pageTrain .answer-input{font-size:1.25rem;padding:.6rem}
+      #pageTrain .answer-section{gap:.4rem}
+      #pageTrain .numpad-btn{aspect-ratio:auto}
+      #pageTrain .eq-stream{max-height:80px}
+    }
     ::-webkit-scrollbar{width:5px}
     ::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px}
     hr.div{border:none;border-top:1px solid var(--border);margin:1rem 0}
@@ -576,7 +627,7 @@
             <label class="label">Button size</label>
             <div class="slider-row">
               <div class="slider-wrap">
-                <input type="range" class="slider" id="padSizeSlider" min="0.6" max="1.5" step="0.1" value="1">
+                <input type="range" class="slider" id="padSizeSlider" min="0.6" max="2.5" step="0.1" value="1">
                 <div class="tick-row" id="padSizeTicks"></div>
               </div>
               <span class="slider-val" id="padSizeVal">1.0×</span>
@@ -1266,7 +1317,7 @@ function buildTicks(containerId, min, max, tickVals, labelFn){
 
 buildTicks('durationTicks',  1, MAX_DURATION_MIN, [1,30,60,120,180,240,300], v=>v<60?v+'m':(v/60)+'h');
 buildTicks('startISITicks', 100,6000, [100,1000,2000,3000,4500,6000], v=>v<1000?v+'ms':(v/1000)+'s');
-buildTicks('padSizeTicks',  0.6,1.5, [0.6,0.8,1.0,1.2,1.5], v=>v+'×');
+buildTicks('padSizeTicks',  0.6,2.5, [0.6,1.0,1.5,2.0,2.5], v=>v+'×');
 buildTicks('speechRateTicks',0.5,3, [0.5,1.0,1.5,2.0,2.5,3.0], v=>v+'×');
 buildTicks('beepVolTicks',   0,  1,  [0,0.25,0.5,0.75,1], v=>Math.round(v*100)+'%');
 buildTicks('coyoteTicks',  100,2000, [100,500,1000,1500,2000], v=>v+'ms');
@@ -1295,7 +1346,7 @@ function wireSlider(id,valId,init,min,max,step,fmt,cb){
 }
 wireSlider('durationSlider','durationVal',  settings.duration,   1, MAX_DURATION_MIN, 1, fmtDuration,       v=>{settings.duration=v;saveSettings();});
 wireSlider('startISISlider','startISIVal',  settings.startISI,   100, 6000, 100, v=>v+' ms',         v=>{settings.startISI=v;saveSettings();});
-wireSlider('padSizeSlider', 'padSizeVal',   settings.padScale,   0.6, 1.5,  0.1, v=>v.toFixed(1)+'×', v=>{settings.padScale=v;applyPadScale();saveSettings();});
+wireSlider('padSizeSlider', 'padSizeVal',   settings.padScale,   0.6, 2.5,  0.1, v=>v.toFixed(1)+'×', v=>{settings.padScale=v;applyPadScale();saveSettings();});
 buildTicks('padColsTicks', 2, 10, [2,3,4,5,6,7,8,9,10], v=>String(v));
 wireSlider('padColsSlider','padColsVal', settings.padCols, 2, 10, 1, v=>String(v), v=>{settings.padCols=v;if(sessionActive)buildNumpad();saveSettings();});
 document.querySelectorAll('input[name="padOrder"]').forEach(r=>{
@@ -1410,7 +1461,7 @@ $('confirmModal').addEventListener('click',e=>{ if(e.target===$('confirmModal'))
 function applySettingsToUI(){
   wireSlider('durationSlider','durationVal',  settings.duration,   1, MAX_DURATION_MIN, 1, fmtDuration,       ()=>{});
   wireSlider('startISISlider','startISIVal',  settings.startISI,   100, 6000, 100, v=>v+' ms',         ()=>{});
-  wireSlider('padSizeSlider', 'padSizeVal',   settings.padScale,   0.6, 1.5,  0.1, v=>v.toFixed(1)+'×', ()=>{});
+  wireSlider('padSizeSlider', 'padSizeVal',   settings.padScale,   0.6, 2.5,  0.1, v=>v.toFixed(1)+'×', ()=>{});
   wireSlider('padColsSlider','padColsVal', settings.padCols, 2, 10, 1, v=>String(v), ()=>{});
   document.querySelectorAll('input[name="padOrder"]').forEach(r=>{ r.checked=r.value===(settings.padOrder||'asc'); });
   wireSlider('speechRateSlider','speechRateVal',settings.speechRate,0.5,3,    0.1, v=>v.toFixed(1)+'×', ()=>{});
@@ -2388,7 +2439,8 @@ function closeCoyoteWindow(){
   if(!coyoteActive) return;
   coyoteActive=false; clearTimeout(coyoteTimeout);
   $('stimulusBox').classList.remove('coyote-active');
-  $('inputHint').textContent='Type your answer · Enter to confirm';
+  $('inputHint').textContent=settings.useNumpad
+    ? 'Tap your answer' : 'Type your answer · Enter to confirm';
 }
 
 function closeIctState(){
@@ -2617,7 +2669,8 @@ function buildNumpad(){
   $('numpad').style.gridTemplateColumns=`repeat(${cols},1fr)`;
 }
 function applyPadScale(){
-  document.querySelectorAll('.numpad-btn').forEach(b=>{ b.style.fontSize=(0.92*settings.padScale)+'rem'; b.style.minHeight=(2.2*settings.padScale)+'rem'; });
+  const pad=$('numpad');
+  if(pad) pad.style.setProperty('--pad-scale', settings.padScale||1);
 }
 function deselect(){ $('numpad').querySelectorAll('.numpad-btn').forEach(b=>b.classList.remove('selected','wrong-sel')); }
 
@@ -2665,7 +2718,8 @@ function startSession(){
   // Show number presentation mode in the topbar subtitle
   const presLabel={'both':'audio+visual','visual':'visual only','audio':'audio only'};
   $('trainSubStatus').textContent='adaptive · '+(presLabel[settings.numberPresentation]||'audio');
-  $('inputHint').textContent='Type your answer · Enter to confirm';
+  $('inputHint').textContent=settings.useNumpad
+    ? 'Tap your answer' : 'Type your answer · Enter to confirm';
   $('feedbackBand').className='feedback-band';
   $('stimInstruction').textContent='Waiting for first number…';
   $('stimNumber').textContent='·'; $('stimNumber').className='stimulus-number hidden-num';
