@@ -593,6 +593,44 @@
           </div>
         </div>
 
+        <!-- ── Bayesian adaption ─────────────────────────────────────
+             A posterior over the interval at which you score the target,
+             updated on every trial and tempered toward flat each time, so
+             old trials fade out at a set rate instead of weighing for the
+             rest of the session. Overrides the two above.
+        ── -->
+        <hr class="div" style="margin-top:1rem">
+        <div class="field" style="margin-top:1rem">
+          <div class="toggle-row">
+            <label class="toggle"><input type="checkbox" id="bayesToggle"><div class="toggle-track"></div></label>
+            <span class="toggle-label"><strong>Bayesian adaption</strong> — estimates the interval at which you hit your target accuracy, and forgets old trials so it follows you quickly</span>
+          </div>
+          <p class="hint" style="margin-top:.5rem">Every answer updates an estimate of your threshold — the interval at which you would score the target — and the next trial is placed at it. Each update also fades everything before it, so a trial from fifty answers ago barely counts and a change in form shows up within a few trials. Overrides Smooth Adapt and Target Accuracy when active.</p>
+          <div class="sub-opts" id="bayesOpts" style="margin-top:.75rem">
+            <div class="field">
+              <label class="label">Target accuracy</label>
+              <div class="slider-row">
+                <div class="slider-wrap">
+                  <input type="range" class="slider" id="bayesTargetSlider">
+                  <div class="tick-row" id="bayesTargetTicks"></div>
+                </div>
+                <span class="slider-val" id="bayesTargetVal">80%</span>
+              </div>
+            </div>
+            <div class="field" style="margin-top:.75rem">
+              <label class="label">Memory</label>
+              <div class="slider-row">
+                <div class="slider-wrap">
+                  <input type="range" class="slider" id="bayesMemorySlider">
+                  <div class="tick-row" id="bayesMemoryTicks"></div>
+                </div>
+                <span class="slider-val" id="bayesMemoryVal">25 trials</span>
+              </div>
+              <p class="hint">Roughly how many recent trials the estimate rests on. Shorter follows you faster and wobbles more; longer is steadier and slower to notice a change. Default 25.</p>
+            </div>
+          </div>
+        </div>
+
         <!-- ISI lower bound — interval never drops below this value -->
         <hr class="div" style="margin-top:1rem">
         <div class="field" style="margin-top:1rem">
@@ -1261,6 +1299,7 @@ const DEFAULTS = {
   fumble:false, fatFinger:false,
   smoothAdapt:false, adaptUp:20, adaptDown:20,
   targetAcc:false, targetAccPct:85,
+  bayesAdapt:false, bayesTargetPct:80, bayesMemory:25,
   isiMin:500,           /* lower bound for ISI (ms) — interval never goes below this */
   coyote:false, coyoteMs:150,
   singleDigit:false, minimalInput:false, hideInput:false, showStream:false,
@@ -1421,6 +1460,11 @@ wireToggle('fumbleToggle', null,          settings.fumble,       v=>{settings.fu
 wireToggle('fatFingerToggle',null,        settings.fatFinger,    v=>{settings.fatFinger=v;saveSettings();});
 wireToggle('smoothAdaptToggle','smoothAdaptOpts',settings.smoothAdapt,v=>{settings.smoothAdapt=v;saveSettings();});
 wireToggle('targetAccToggle','targetAccOpts',settings.targetAcc,v=>{settings.targetAcc=v;saveSettings();});
+wireToggle('bayesToggle','bayesOpts',settings.bayesAdapt,v=>{settings.bayesAdapt=v;saveSettings();});
+buildTicks('bayesTargetTicks',50,95,[50,60,70,80,90,95],v=>v+'%');
+buildTicks('bayesMemoryTicks',8,100,[8,25,50,75,100],v=>String(v));
+wireSlider('bayesTargetSlider','bayesTargetVal',settings.bayesTargetPct,50,95,1,v=>v+'%',v=>{settings.bayesTargetPct=v;saveSettings();});
+wireSlider('bayesMemorySlider','bayesMemoryVal',settings.bayesMemory,8,100,1,v=>v+' trials',v=>{settings.bayesMemory=v;saveSettings();});
 buildTicks('targetAccTicks',50,99,[50,60,70,75,80,85,90,95,99],v=>v+'%');
 wireSlider('targetAccSlider','targetAccVal',settings.targetAccPct,50,99,1,v=>v+'%',v=>{settings.targetAccPct=v;saveSettings();});
 wireToggle('coyoteToggle','coyoteOpts',  settings.coyote,       v=>{settings.coyote=v;saveSettings();});
@@ -1483,6 +1527,9 @@ function applySettingsToUI(){
   $('fatFingerToggle').checked=settings.fatFinger;
   $('smoothAdaptToggle').checked=settings.smoothAdapt; $('smoothAdaptOpts').classList.toggle('open',settings.smoothAdapt);
   $('targetAccToggle').checked=settings.targetAcc; $('targetAccOpts').classList.toggle('open',settings.targetAcc);
+  $('bayesToggle').checked=settings.bayesAdapt; $('bayesOpts').classList.toggle('open',settings.bayesAdapt);
+  wireSlider('bayesTargetSlider','bayesTargetVal',settings.bayesTargetPct,50,95,1,v=>v+'%',()=>{});
+  wireSlider('bayesMemorySlider','bayesMemoryVal',settings.bayesMemory,8,100,1,v=>v+' trials',()=>{});
   wireSlider('targetAccSlider','targetAccVal',settings.targetAccPct,50,99,1,v=>v+'%',()=>{});
   $('coyoteToggle').checked=settings.coyote;     $('coyoteOpts').classList.toggle('open',settings.coyote);
   initAnswerRangeUI();
@@ -2276,10 +2323,114 @@ let taWindow = [];      // rolling window of booleans (last 20 trials)
 const TA_WIN  = 20;     // window size
 const TA_MAX_NUDGE = 80; // ms — cap per-trial nudge so changes feel gradual
 
+/* ── Bayesian threshold estimate ───────────────────────────────────
+   One idea used twice: a posterior over T, the interval (in log10 ms) at
+   which you score a given accuracy, on a grid.
+
+   The likelihood of a trial at interval x is a psychometric curve that
+   rises with x: γ + (1−γ−λ)·logistic(β(x − T) + c), with c chosen so that
+   the curve passes through the target exactly at x = T. γ is the chance of a
+   right answer by luck (small — the answer is typed, not picked) and λ the
+   lapse rate, the share of trials lost however slow the pace.
+
+   Forgetting is tempering: before each update the log-posterior is scaled by
+   (1 − 1/memory), which pulls it toward flat. A trial's weight then decays
+   geometrically, so the estimate rests on roughly the last `memory` trials
+   rather than on every trial since the start, and when form changes the
+   posterior moves in a few answers instead of having to outvote the whole
+   session.
+
+   CONTROLLER: with Bayesian adaption on, each trial is placed at the current
+   estimate for the chosen target, a step capped at 15% so the pace never
+   lurches.
+
+   DIFFICULTY: a second posterior runs in every mode at a fixed 80%, so the
+   number a session records does not depend on which controller ran it or on
+   what target was set. See `cctDifficulty` for what is made of it.
+── */
+const BAY_GRID = (()=>{ const g=[]; for(let t=Math.log10(100); t<=Math.log10(8000)+1e-9; t+=0.01) g.push(t); return g; })();
+const BAY_SLOPE = 10;      // per log10 unit: 20%→80% over about a factor of 1.7 in interval
+const BAY_GUESS = 0.02, BAY_LAPSE = 0.04;
+const BAY_STEP_CAP = 0.15;
+
+function bayesCreate(startISI, target, memory){
+  const mu=Math.log10(startISI), sd=0.25;
+  return { target, memory, n:0,
+    log: BAY_GRID.map(t=>-0.5*((t-mu)/sd)**2) };
+}
+function bayesP(x, t, target){
+  const span=1-BAY_GUESS-BAY_LAPSE;
+  const q=clamp((target-BAY_GUESS)/span, 0.01, 0.99);
+  const c=Math.log(q/(1-q));
+  return BAY_GUESS + span/(1+Math.exp(-(BAY_SLOPE*(x-t)+c)));
+}
+function bayesObserve(b, isi, ok){
+  const x=Math.log10(Math.max(1,isi)), keep=1-1/Math.max(2,b.memory);
+  let max=-Infinity;
+  for(let i=0;i<BAY_GRID.length;i++){
+    const p=clamp(bayesP(x, BAY_GRID[i], b.target), 1e-6, 1-1e-6);
+    b.log[i]=b.log[i]*keep + Math.log(ok?p:1-p);
+    if(b.log[i]>max) max=b.log[i];
+  }
+  for(let i=0;i<b.log.length;i++) b.log[i]-=max;   // keep the numbers small
+  b.n++;
+}
+/** Posterior mean of T and its spread, both in log10 ms. */
+function bayesStats(b){
+  let z=0, m=0, v=0;
+  const w=b.log.map(l=>Math.exp(l));
+  w.forEach((wi,i)=>{ z+=wi; m+=wi*BAY_GRID[i]; });
+  m/=z;
+  w.forEach((wi,i)=>{ v+=wi*(BAY_GRID[i]-m)**2; });
+  return { mean:m, sd:Math.sqrt(v/z) };
+}
+const bayesThresholdMs = b => Math.round(Math.pow(10, bayesStats(b).mean));
+
+/* ── Difficulty ─────────────────────────────────────────────────────
+   The archive's old figure was the fastest interval reached, as items per
+   minute. Two things wrong with it: the fastest interval is the luckiest
+   moment of the session, not its level, and a 1-back at 1000 ms and a 3-back
+   at 1000 ms came out the same.
+
+   Now: items per minute at the THRESHOLD — the interval the always-on 80%
+   posterior settled at, best over the session once it has 20 trials behind
+   it — times a weight for the depth held. The weight is 1 + log2(n): the step
+   from 1-back to 2-back doubles the work (one number held becomes an ordered
+   pair that shifts every trial), and each further step adds less, since what
+   grows is the length of a list you already know how to rotate. 1, 2, 2.58,
+   3, 3.32 for n = 1…5. A judgement rather than a measurement — kept in one
+   function so it can be revised against the record.
+── */
+const nbackWeight = n => 1 + Math.log2(Math.max(1, n||1));
+function cctDifficulty(thresholdISI, n){
+  if(!(thresholdISI>0)) return null;
+  return Math.round(60000/thresholdISI * nbackWeight(n) * 10) / 10;
+}
+
+let bayesCtrl = null;      // the controller, when Bayesian adaption is on
+let bayesMeter = null;     // the difficulty posterior, always on
+let bestThresholdISI = null;
+const METER_TARGET = 0.80, METER_MEMORY = 30, METER_MIN_TRIALS = 20;
+
 function adaptISI(ok){
   const lo = Math.max(50, settings.isiMin||0);
 
-  if(settings.targetAcc){
+  /* The trial just answered ran at currentISI; both posteriors learn from it
+     before anything moves the interval. */
+  if(bayesMeter){
+    bayesObserve(bayesMeter, currentISI, ok);
+    if(bayesMeter.n >= METER_MIN_TRIALS){
+      const t=bayesThresholdMs(bayesMeter);
+      if(bestThresholdISI==null || t<bestThresholdISI) bestThresholdISI=t;
+    }
+  }
+
+  if(settings.bayesAdapt && bayesCtrl){
+    bayesObserve(bayesCtrl, currentISI, ok);
+    const want=bayesThresholdMs(bayesCtrl);
+    const step=clamp(want, currentISI*(1-BAY_STEP_CAP), currentISI*(1+BAY_STEP_CAP));
+    currentISI = clamp(Math.round(step), lo, 6000);
+  } else if(settings.targetAcc){
     /* ── Target Accuracy controller ─────────────────────────────────
        Maintains a rolling window of recent trial outcomes.
        Each trial, it compares the rolling accuracy to the target and
@@ -2647,7 +2798,10 @@ function updateTrainStats(){
   // Target accuracy pill — shows rolling window accuracy vs target
   const tap=$('targetAccPill');
   if(tap){
-    if(settings.targetAcc && taWindow.length>=5){
+    if(settings.bayesAdapt && bayesCtrl && bayesCtrl.n>=3){
+      tap.style.display='';
+      tap.textContent=`🎯 ${settings.bayesTargetPct}% at ~${bayesThresholdMs(bayesCtrl)} ms`;
+    } else if(settings.targetAcc && taWindow.length>=5){
       const ra=Math.round(taWindow.filter(Boolean).length/taWindow.length*100);
       tap.style.display='';
       tap.textContent=`🎯 ${ra}% → ${settings.targetAccPct}%`;
@@ -2756,6 +2910,9 @@ function startSession(){
   totalCorrect=totalAttempts=currentStreak=0;
   recentResults=[];
   taWindow=[];
+  bayesCtrl = bayesCreate(currentISI, (settings.bayesTargetPct||80)/100, settings.bayesMemory||25);
+  bayesMeter = bayesCreate(currentISI, METER_TARGET, METER_MEMORY);
+  bestThresholdISI = null;
   trialHistory=[]; numberSequence=[]; correctAnswer=prevCorrectAnswer=null;
   prevAnswerMissed=false; answerProcessed=true; coyoteActive=false; ictTrial=false;
   rrtArrowGiven=null; ndmArrowGiven=null;
@@ -2961,6 +3118,11 @@ function showResults(){
     durationSec,
     nback: settings.nback,
     ict: settings.ict,
+    /* The 80% threshold and the n-weighted figure made from it; absent when
+       the session was too short to say (under 20 answered trials). */
+    ...(bestThresholdISI ? { thresholdISI: bestThresholdISI,
+                             difficulty: cctDifficulty(bestThresholdISI, settings.nback) } : {}),
+    adapt: settings.bayesAdapt ? 'bayes' : settings.targetAcc ? 'target' : settings.smoothAdapt ? 'smooth' : 'standard',
   });
   if(prog.history.length>100) prog.history=prog.history.slice(0,100); // keep last 100
   saveProgress(prog);
@@ -2969,7 +3131,11 @@ function showResults(){
   $('resultMainStats').innerHTML=
     mkStat('Correct Answers',`${totalCorrect} / ${totalAttempts}`)+
     mkStat('Accuracy',acc+'%','accent-val')+
-    mkStat('Lowest Interval',lowestISI+' ms');
+    mkStat('Lowest Interval',lowestISI+' ms')+
+    (bestThresholdISI
+      ? mkStat('80% Threshold',bestThresholdISI+' ms')+
+        mkStat('Difficulty',cctDifficulty(bestThresholdISI,settings.nback),'accent-val')
+      : mkStat('Difficulty','needs 20 trials'));
   $('resultCumStats').innerHTML=
     mkStat('Sessions',prog.sessions)+
     mkStat('Total Questions',prog.totalQ.toLocaleString('en'))+
